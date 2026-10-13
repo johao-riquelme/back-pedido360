@@ -1,0 +1,20 @@
+package com.pedidos360.backend_pedidos360.controller;
+
+import com.pedidos360.backend_pedidos360.service.Sender;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/messages")
+public class MessageController {
+
+    @Autowired
+    private Sender sender;
+
+    @PostMapping
+    public ResponseEntity<String> send(@RequestParam String message) {
+        sender.sendMessage(message);
+        return ResponseEntity.ok("Mensaje enviado a la cola: " + message);
+    }
+}
