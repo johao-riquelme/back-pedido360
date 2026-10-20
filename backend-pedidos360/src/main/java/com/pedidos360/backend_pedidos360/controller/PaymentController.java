@@ -1,42 +1,52 @@
 package com.pedidos360.backend_pedidos360.controller;
 
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
 import cl.transbank.webpay.webpayplus.WebpayPlus;
 import cl.transbank.webpay.webpayplus.responses.WebpayPlusTransactionCreateResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pedidos360.backend_pedidos360.service.Sender;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
 @RequestMapping("/api/payments")
-@CrossOrigin(origins = "*") // Permite peticiones desde tu frontend en Angular
+@CrossOrigin(origins = "*")
 public class PaymentController {
+
+    @Autowired
+    private Sender sender;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    private final Map<String, Map<String, Object>> pendingOrders = new ConcurrentHashMap<>();
 
     @PostMapping("/initiate")
     public ResponseEntity<?> initiatePayment(@RequestBody Map<String, Object> payload) {
         try {
-            // 1. Obtener el monto total enviado desde el frontend
             Double totalAmount = Double.parseDouble(payload.get("totalAmount").toString());
-            
-            // 2. Generar identificadores únicos de compra y sesión
+
             String buyOrder = "O-" + UUID.randomUUID().toString().substring(0, 8);
             String sessionId = "S-" + UUID.randomUUID().toString().substring(0, 8);
-            
-            // 3. URL de retorno tras el pago en Transbank
-            String returnUrl = "http://localhost:8080/api/payments/commit";
 
-            // 4. Crear la instancia de la transacción e iniciar en Webpay Plus (SDK v3.x)
+            String returnUrl = "https://34.207.115.35.sslip.io/api/payments/commit";
+
             WebpayPlus.Transaction transaction = new WebpayPlus.Transaction();
             WebpayPlusTransactionCreateResponse response = transaction.create(
-                buyOrder, 
-                sessionId, 
-                totalAmount, 
+                buyOrder,
+                sessionId,
+                totalAmount,
                 returnUrl
             );
 
-            // 5. Retornar la URL de Transbank y el token hacia Angular
+            pendingOrders.put(response.getToken(), new HashMap<>(payload));
+
             Map<String, String> result = new HashMap<>();
             result.put("url", response.getUrl());
             result.put("token", response.getToken());
@@ -50,22 +60,44 @@ public class PaymentController {
         }
     }
 
-    // Endpoint de retorno donde Transbank responde tras el pago
     @RequestMapping(value = "/commit", method = {RequestMethod.GET, RequestMethod.POST})
-    public ResponseEntity<?> commitPayment(@RequestParam("token_ws") String tokenWs) {
+    public void commitPayment(
+            @RequestParam(value = "token_ws", required = false) String tokenWs,
+            HttpServletResponse httpResponse
+    ) throws IOException {
         try {
-            // Instanciar la transacción y confirmar el pago con Transbank (SDK v3.x)
+            if (tokenWs == null || tokenWs.isEmpty()) {
+                httpResponse.sendRedirect("https://34.207.115.35.sslip.io/?payment=aborted");
+                return;
+            }
             WebpayPlus.Transaction transaction = new WebpayPlus.Transaction();
             var response = transaction.commit(tokenWs);
-            
+
+            Map<String, Object> orderData = pendingOrders.remove(tokenWs);
+
             if (response.getResponseCode() == 0) {
-                // AQUÍ ENGANCHAREMOS EL PASO 3: Publicar evento a RabbitMQ para guardar la orden automáticamente
-                return ResponseEntity.ok("Pago Aprobado en Transbank. Orden: " + response.getBuyOrder());
+                // Intentar enviar a RabbitMQ pero sin interrumpir la redirección si falla
+                try {
+                    if (orderData == null) {
+                        orderData = new HashMap<>();
+                    }
+                    orderData.put("buyOrder", response.getBuyOrder());
+                    orderData.put("totalAmount", response.getAmount());
+
+                    String jsonOrder = objectMapper.writeValueAsString(orderData);
+                    sender.sendMessage(jsonOrder);
+                } catch (Exception amqpEx) {
+                    System.err.println("Error en RabbitMQ: " + amqpEx.getMessage());
+                }
+
+                // Redirigir al frontend desplegado en AWS EC2
+                httpResponse.sendRedirect("https://34.207.115.35.sslip.io/?payment=success&buyOrder=" + response.getBuyOrder());
             } else {
-                return ResponseEntity.badRequest().body("El pago fue rechazado por Transbank.");
+                httpResponse.sendRedirect("https://34.207.115.35.sslip.io/?payment=rejected");
             }
         } catch (Exception e) {
-            return ResponseEntity.internalServerError().body("Error al confirmar el pago: " + e.getMessage());
+            e.printStackTrace();
+            httpResponse.sendRedirect("https://34.207.115.35.sslip.io/?payment=error");
         }
     }
 }
