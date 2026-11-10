@@ -1,58 +1,95 @@
 package com.pedidos360.backend_pedidos360.controller;
 
-import com.pedidos360.backend_pedidos360.model.Order;
-import com.pedidos360.backend_pedidos360.repository.OrderRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
-
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.pedidos360.backend_pedidos360.model.Order;
+import com.pedidos360.backend_pedidos360.repository.OrderRepository;
 @RestController
 @RequestMapping("/api/orders")
 @CrossOrigin(origins = "*")
 public class OrderController {
 
-    @Autowired
-    private OrderRepository orderRepository;
+    private final OrderRepository orderRepository;
 
-    // 1. OBTENER TODOS LOS PEDIDOS DESDE NEON (GET)
+    public OrderController(OrderRepository orderRepository) {
+        this.orderRepository = orderRepository;
+    }
     @GetMapping
     public List<Order> getOrders() {
         return orderRepository.findAll();
     }
-
-    // 2. CREAR UN NUEVO PEDIDO EN NEON (POST)
     @PostMapping
-    public Order createOrder(@RequestBody Order order) {
-        if (order.getFecha() == null) {
-            order.setFecha(LocalDate.now().toString());
-        }
-        // Neon / PostgreSQL genera el ID automáticamente mediante @GeneratedValue
-        return orderRepository.save(order);
-    }
+    public ResponseEntity<?> createOrder(@RequestBody Order order) {
 
-    // 3. CAMBIAR ESTADO DE UN PEDIDO EN NEON (PUT /api/orders/{id}/status)
+        if (order == null) {
+            return ResponseEntity.badRequest().body(
+                Map.of("error", "No se recibieron datos del pedido.")
+            );
+        }
+
+        if (order.getCliente() == null ||
+            order.getCliente().isBlank()) {
+
+            return ResponseEntity.badRequest().body(
+                Map.of("error", "El nombre de la empresa es obligatorio.")
+            );
+        }
+        if (order.getTotal() == null ||
+            !Double.isFinite(order.getTotal()) ||
+            order.getTotal() <= 0) {
+
+            return ResponseEntity.badRequest().body(
+                Map.of("error", "El total del pedido no es válido.")
+            );
+        }
+        order.setId(null);
+
+        order.setEstado("CREADO");
+
+        order.setFecha(LocalDate.now().toString());
+
+        Order nuevoPedido = orderRepository.save(order);
+
+        System.out.println(
+            "[Pedidos360] Pedido creado #" + nuevoPedido.getId()
+        );
+
+        return ResponseEntity.status(HttpStatus.CREATED)
+            .body(nuevoPedido);
+    }
     @PutMapping("/{id}/status")
-    public ResponseEntity<Order> updateStatus(@PathVariable Long id, @RequestBody Map<String, String> body) {
-        String nuevoEstado = body.get("estado");
-        
-        return orderRepository.findById(id).map(order -> {
-            order.setEstado(nuevoEstado);
-            Order updatedOrder = orderRepository.save(order);
-            return ResponseEntity.ok(updatedOrder);
-        }).orElse(ResponseEntity.notFound().build());
-    }
+    public ResponseEntity<?> updateStatus(@PathVariable Long id) {
 
-    // 4. ELIMINAR UN PEDIDO EN NEON (DELETE)
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(
+            Map.of(
+                "error",
+                "El estado del pedido no puede modificarse " +
+                "desde esta ruta."
+            )
+        );
+    }
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteOrder(@PathVariable Long id) {
-        if (orderRepository.existsById(id)) {
-            orderRepository.deleteById(id);
-            return ResponseEntity.ok().build();
-        }
-        return ResponseEntity.notFound().build();
+    public ResponseEntity<?> deleteOrder(@PathVariable Long id) {
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(
+            Map.of(
+                "error",
+                "La eliminación de pedidos está deshabilitada."
+            )
+        );
     }
 }
