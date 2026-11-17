@@ -36,6 +36,9 @@ public class ProductController {
             if (productDetails.getPrecio() != null) product.setPrecio(productDetails.getPrecio());
             if (productDetails.getStock() != null) product.setStock(productDetails.getStock());
             if (productDetails.getCategoria() != null) product.setCategoria(productDetails.getCategoria());
+            if (productDetails.getDescripcion() != null) product.setDescripcion(productDetails.getDescripcion());
+            if (productDetails.getImagenUrl() != null) product.setImagenUrl(productDetails.getImagenUrl());
+            
             Product updatedProduct = productRepository.save(product);
             return ResponseEntity.ok(updatedProduct);
         }).orElse(ResponseEntity.notFound().build());
