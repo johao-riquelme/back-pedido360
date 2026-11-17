@@ -45,7 +45,7 @@ public class PaymentController {
     private final PaymentTransactionRepository paymentRepository;
     private final ObjectMapper objectMapper;
 
-    @Value("${pedidos360.public-url:https://54.174.64.200.sslip.io}")
+    @Value("${pedidos360.public-https://54.163.206.180.sslip.io}")
     private String publicUrl;
 
     public PaymentController(
