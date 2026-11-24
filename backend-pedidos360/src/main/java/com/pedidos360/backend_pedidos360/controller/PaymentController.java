@@ -23,12 +23,14 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.pedidos360.backend_pedidos360.model.EventoPedido;
 import com.pedidos360.backend_pedidos360.model.Order;
 import com.pedidos360.backend_pedidos360.model.PaymentTransaction;
 import com.pedidos360.backend_pedidos360.model.Product;
 import com.pedidos360.backend_pedidos360.repository.OrderRepository;
 import com.pedidos360.backend_pedidos360.repository.PaymentTransactionRepository;
 import com.pedidos360.backend_pedidos360.repository.ProductRepository;
+import com.pedidos360.backend_pedidos360.service.KafkaProducerService;
 import com.pedidos360.backend_pedidos360.service.Sender;
 
 import cl.transbank.webpay.webpayplus.WebpayPlus;
@@ -40,21 +42,27 @@ import jakarta.servlet.http.HttpServletResponse;
 public class PaymentController {
 
     private final Sender sender;
+    private final KafkaProducerService kafkaProducerService;
     private final OrderRepository orderRepository;
     private final ProductRepository productRepository;
     private final PaymentTransactionRepository paymentRepository;
     private final ObjectMapper objectMapper;
 
-    @Value("${pedidos360.public-https://54.163.206.180.sslip.io}")
+    @Value("${pedidos360.public-url:http://ec2-54-160-221-198.compute-1.amazonaws.com:8080}")
     private String publicUrl;
+
+    @Value("${pedidos360.frontend-url:https://54.160.221.198.sslip.io}")
+    private String frontendUrl;
 
     public PaymentController(
             Sender sender,
+            KafkaProducerService kafkaProducerService,
             OrderRepository orderRepository,
             ProductRepository productRepository,
             PaymentTransactionRepository paymentRepository,
             ObjectMapper objectMapper) {
         this.sender = sender;
+        this.kafkaProducerService = kafkaProducerService;
         this.orderRepository = orderRepository;
         this.productRepository = productRepository;
         this.paymentRepository = paymentRepository;
@@ -108,7 +116,7 @@ public class PaymentController {
             }
 
             BigDecimal total = BigDecimal.ZERO;
-            List verifiedItems = new ArrayList<>();
+            List<Map<String, Object>> verifiedItems = new ArrayList<>();
             for (Map.Entry<Long, Integer> entry : quantities.entrySet()) {
                 Product product = productRepository.findById(entry.getKey())
                         .orElseThrow(() -> new IllegalArgumentException("Producto no encontrado."));
@@ -245,13 +253,20 @@ public class PaymentController {
 
     @SuppressWarnings("unchecked")
     private void publishPayment(PaymentTransaction payment) throws Exception {
-        List items = objectMapper.readValue(payment.getItemsJson(), List.class);
+        List<Map<String, Object>> items = objectMapper.readValue(payment.getItemsJson(), List.class);
         Map<String, Object> orderData = new HashMap<>();
         orderData.put("orderId", payment.getOrderId());
         orderData.put("buyOrder", payment.getBuyOrder());
         orderData.put("totalAmount", payment.getAmount());
         orderData.put("items", items);
         sender.sendMessage(objectMapper.writeValueAsString(orderData));
+
+        EventoPedido eventoKafka = new EventoPedido(
+                String.valueOf(payment.getOrderId()),
+                "AUTHORIZED",
+                payment.getAmount().doubleValue()
+        );
+        kafkaProducerService.enviarEvento(eventoKafka.getPedidoId(), eventoKafka);
     }
 
     private static String sha256(String value) {
@@ -269,6 +284,6 @@ public class PaymentController {
     }
 
     private void redirect(HttpServletResponse response, String paymentState) throws IOException {
-        response.sendRedirect(baseUrl() + "/customer?payment=" + paymentState);
+        response.sendRedirect(frontendUrl.replaceAll("/+$", "") + "/customer?payment=" + paymentState);
     }
 }
