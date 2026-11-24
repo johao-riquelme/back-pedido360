@@ -13,6 +13,8 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -22,7 +24,6 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.pedidos360.backend_pedidos360.model.EventoPedido;
 import com.pedidos360.backend_pedidos360.model.Order;
 import com.pedidos360.backend_pedidos360.model.PaymentTransaction;
@@ -36,10 +37,14 @@ import com.pedidos360.backend_pedidos360.service.Sender;
 import cl.transbank.webpay.webpayplus.WebpayPlus;
 import cl.transbank.webpay.webpayplus.responses.WebpayPlusTransactionCreateResponse;
 import jakarta.servlet.http.HttpServletResponse;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 @RestController
 @RequestMapping("/api/payments")
 public class PaymentController {
+
+    private static final Logger log = LoggerFactory.getLogger(PaymentController.class);
 
     private final Sender sender;
     private final KafkaProducerService kafkaProducerService;
@@ -111,7 +116,9 @@ public class PaymentController {
                 }
                 Long productId = Long.valueOf(item.get("productId").toString());
                 int quantity = Integer.parseInt(item.get("quantity").toString());
-                if (quantity <= 0) throw new IllegalArgumentException("Cantidad inválida.");
+                if (quantity <= 0) {
+                    throw new IllegalArgumentException("Cantidad inválida.");
+                }
                 quantities.merge(productId, quantity, Math::addExact);
             }
 
@@ -169,10 +176,9 @@ public class PaymentController {
         } catch (IllegalArgumentException | ArithmeticException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
-            System.err.println("[Webpay] Error al iniciar transacción: " + e.getMessage());
-            e.printStackTrace();
+            log.error("[Webpay] Error al iniciar transacción", e);
             return ResponseEntity.internalServerError().body(Map.of(
-                    "error", "No fue posible iniciar Webpay. " + e.getMessage()));
+                    "error", "No fue posible iniciar Webpay. Intenta nuevamente."));
         }
     }
 
@@ -199,7 +205,7 @@ public class PaymentController {
                     .orElse(null);
 
             if (payment == null) {
-                System.err.println("[Webpay] No existe una transacción local para el token recibido.");
+                log.error("[Webpay] No existe una transacción local para el token recibido.");
                 redirect(httpResponse, "pending");
                 return;
             }
@@ -229,7 +235,7 @@ public class PaymentController {
                 BigDecimal amount = BigDecimal.valueOf(response.getAmount());
                 if (!payment.getBuyOrder().equals(response.getBuyOrder()) ||
                         payment.getAmount().compareTo(amount) != 0) {
-                    System.err.println("[Webpay] Referencia o importe no coincide, pago #" + payment.getId());
+                    log.error("[Webpay] Referencia o importe no coincide, pago #{}", payment.getId());
                     redirect(httpResponse, "pending");
                     return;
                 }
@@ -245,15 +251,15 @@ public class PaymentController {
             redirect(httpResponse, "success");
 
         } catch (Exception e) {
-            System.err.println("[Webpay] Confirmación pendiente: " + e.getMessage());
-            e.printStackTrace();
+            log.error("[Webpay] Confirmación pendiente", e);
             redirect(httpResponse, "pending");
         }
     }
 
-    @SuppressWarnings("unchecked")
     private void publishPayment(PaymentTransaction payment) throws Exception {
-        List<Map<String, Object>> items = objectMapper.readValue(payment.getItemsJson(), List.class);
+        List<Map<String, Object>> items = objectMapper.readValue(
+                payment.getItemsJson(), new TypeReference<List<Map<String, Object>>>() { });
+
         Map<String, Object> orderData = new HashMap<>();
         orderData.put("orderId", payment.getOrderId());
         orderData.put("buyOrder", payment.getBuyOrder());
