@@ -15,14 +15,32 @@ public class Product {
     private Integer stock;
     private String categoria;
 
+    @Column(columnDefinition = "TEXT")
+    private String descripcion;
+
+    @Column(columnDefinition = "TEXT")
+    private String imagenUrl;
+
     public Product() {}
 
+    // Constructor original conservado para compatibilidad con el inicializador de datos
     public Product(Long id, String nombre, Double precio, Integer stock, String categoria) {
         this.id = id;
         this.nombre = nombre;
         this.precio = precio;
         this.stock = stock;
         this.categoria = categoria;
+    }
+
+    // Constructor completo con descripción e imagen
+    public Product(Long id, String nombre, Double precio, Integer stock, String categoria, String descripcion, String imagenUrl) {
+        this.id = id;
+        this.nombre = nombre;
+        this.precio = precio;
+        this.stock = stock;
+        this.categoria = categoria;
+        this.descripcion = descripcion;
+        this.imagenUrl = imagenUrl;
     }
 
     public Long getId() { return id; }
@@ -39,4 +57,10 @@ public class Product {
 
     public String getCategoria() { return categoria; }
     public void setCategoria(String categoria) { this.categoria = categoria; }
+
+    public String getDescripcion() { return descripcion; }
+    public void setDescripcion(String descripcion) { this.descripcion = descripcion; }
+
+    public String getImagenUrl() { return imagenUrl; }
+    public void setImagenUrl(String imagenUrl) { this.imagenUrl = imagenUrl; }
 }
