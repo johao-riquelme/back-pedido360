@@ -33,3 +33,6 @@ build/
 /target/
 .env
 *.env
+# Archivos compilados
+*.jar
+/target/
