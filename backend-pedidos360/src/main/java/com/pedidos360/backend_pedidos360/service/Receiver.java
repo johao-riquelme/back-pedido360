@@ -228,6 +228,12 @@ public class Receiver {
 
             // 8. Actualizar el pedido ORIGINAL
             // Se conserva el nombre de la empresa.
+            pedido.setDetalleProductos(pago.getItemsJson());
+            pedido.setCantidad(cantidades.values().stream().reduce(0, Math::addExact));
+            pedido.setProductoId(cantidades.size() == 1 ? cantidades.keySet().iterator().next() : null);
+            Object nombre = items.size() == 1 ? items.get(0).get("nombre") : null;
+            pedido.setProductoNombre(nombre instanceof String ? (String) nombre : null);
+            pedido.setMetodoPago("Webpay Transbank");
             pedido.setEstado("PAGADO");
 
             // 9. Marcar la transacción como procesada

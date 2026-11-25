@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.pedidos360.backend_pedidos360.model.Order;
 import com.pedidos360.backend_pedidos360.repository.OrderRepository;
+
 @RestController
 @RequestMapping("/api/orders")
 @CrossOrigin(origins = "*")
@@ -28,10 +29,12 @@ public class OrderController {
     public OrderController(OrderRepository orderRepository) {
         this.orderRepository = orderRepository;
     }
+
     @GetMapping
     public List<Order> getOrders() {
         return orderRepository.findAll();
     }
+
     @PostMapping
     public ResponseEntity<?> createOrder(@RequestBody Order order) {
 
@@ -48,6 +51,7 @@ public class OrderController {
                 Map.of("error", "El nombre de la empresa es obligatorio.")
             );
         }
+
         if (order.getTotal() == null ||
             !Double.isFinite(order.getTotal()) ||
             order.getTotal() <= 0) {
@@ -56,11 +60,16 @@ public class OrderController {
                 Map.of("error", "El total del pedido no es válido.")
             );
         }
+
         order.setId(null);
-
         order.setEstado("CREADO");
-
         order.setFecha(LocalDate.now().toString());
+
+        if ((order.getDetalleProductos() == null || order.getDetalleProductos().isBlank())
+                && order.getProductoNombre() != null && !order.getProductoNombre().isBlank()) {
+            int qty = (order.getCantidad() != null && order.getCantidad() > 0) ? order.getCantidad() : 1;
+            order.setDetalleProductos(order.getProductoNombre().trim() + " (x" + qty + ")");
+        }
 
         Order nuevoPedido = orderRepository.save(order);
 
@@ -71,6 +80,7 @@ public class OrderController {
         return ResponseEntity.status(HttpStatus.CREATED)
             .body(nuevoPedido);
     }
+
     @PutMapping("/{id}/status")
     public ResponseEntity<?> updateStatus(@PathVariable Long id) {
 
@@ -82,6 +92,7 @@ public class OrderController {
             )
         );
     }
+
     @DeleteMapping("/{id}")
     public ResponseEntity<?> deleteOrder(@PathVariable Long id) {
 

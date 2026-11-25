@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.pedidos360.backend_pedidos360.model.EventoPago;
 import com.pedidos360.backend_pedidos360.model.EventoPedido;
 import com.pedidos360.backend_pedidos360.model.Order;
 import com.pedidos360.backend_pedidos360.model.PaymentTransaction;
@@ -53,10 +54,10 @@ public class PaymentController {
     private final PaymentTransactionRepository paymentRepository;
     private final ObjectMapper objectMapper;
 
-    @Value("${pedidos360.public-url:http://ec2-54-160-221-198.compute-1.amazonaws.com:8080}")
+    @Value("${pedidos360.public-url:https://3.85.124.151.sslip.io}")
     private String publicUrl;
 
-    @Value("${pedidos360.frontend-url:https://54.160.221.198.sslip.io}")
+    @Value("${pedidos360.frontend-url:https://3.85.124.151.sslip.io}")
     private String frontendUrl;
 
     public PaymentController(
@@ -138,6 +139,7 @@ public class PaymentController {
                 item.put("productId", entry.getKey());
                 item.put("quantity", quantity);
                 item.put("price", product.getPrecio());
+                item.put("nombre", product.getNombre());
                 verifiedItems.add(item);
             }
 
@@ -154,6 +156,15 @@ public class PaymentController {
                         "error", "El monto mínimo para pagar con Webpay es de $50 CLP."));
             }
 
+            // Guardar el carrito verificado, no el precio enviado por el navegador.
+            String verifiedJson = objectMapper.writeValueAsString(verifiedItems);
+            order.setDetalleProductos(verifiedJson);
+            order.setCantidad(quantities.values().stream().reduce(0, Math::addExact));
+            order.setProductoId(verifiedItems.size() == 1 ? quantities.keySet().iterator().next() : null);
+            order.setProductoNombre(verifiedItems.size() == 1 ? (String) verifiedItems.get(0).get("nombre") : null);
+            order.setMetodoPago("Webpay Transbank");
+            orderRepository.saveAndFlush(order);
+
             String buyOrder = "O-" + UUID.randomUUID().toString().substring(0, 8);
             String sessionId = "S-" + UUID.randomUUID().toString().substring(0, 8);
             String returnUrl = baseUrl() + "/api/payments/commit";
@@ -167,7 +178,7 @@ public class PaymentController {
             payment.setBuyOrder(buyOrder);
             payment.setTokenHash(sha256(webpay.getToken()));
             payment.setAmount(total);
-            payment.setItemsJson(objectMapper.writeValueAsString(verifiedItems));
+            payment.setItemsJson(verifiedJson);
             payment.setEstado("CREATED");
             paymentRepository.saveAndFlush(payment);
 
@@ -257,6 +268,7 @@ public class PaymentController {
     }
 
     private void publishPayment(PaymentTransaction payment) throws Exception {
+        // 1. Mensajería transaccional en RabbitMQ
         List<Map<String, Object>> items = objectMapper.readValue(
                 payment.getItemsJson(), new TypeReference<List<Map<String, Object>>>() { });
 
@@ -267,12 +279,22 @@ public class PaymentController {
         orderData.put("items", items);
         sender.sendMessage(objectMapper.writeValueAsString(orderData));
 
+        // 2. Streaming de evento en Kafka - Tópico 1: pedidos-eventos
         EventoPedido eventoKafka = new EventoPedido(
                 String.valueOf(payment.getOrderId()),
                 "AUTHORIZED",
                 payment.getAmount().doubleValue()
         );
         kafkaProducerService.enviarEvento(eventoKafka.getPedidoId(), eventoKafka);
+
+        // 3. Streaming de evento en Kafka - Tópico 2: pagos-eventos
+        EventoPago eventoPago = new EventoPago(
+                payment.getBuyOrder(),
+                payment.getOrderId(),
+                payment.getAmount().doubleValue(),
+                "AUTHORIZED"
+        );
+        kafkaProducerService.enviarEventoPago(payment.getBuyOrder(), eventoPago);
     }
 
     private static String sha256(String value) {
